@@ -1,0 +1,5 @@
+{
+  "_comment": "复制为 managers.json（不会提交到 git）。键是 ESPN 队伍缩写，值是这支队经理的称呼。",
+  "ABC": "Alice",
+  "XYZ": "Bob"
+}

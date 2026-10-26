@@ -31,7 +31,8 @@ def _player_owner(player_name: str) -> dict[str, Any]:
     hits = {p: t for p, t in fantasy.get_rostered_players().items() if q in norm(p)}
     if not hits:
         return {"player": player_name, "owner": None, "note": "没有被联赛任何队伍持有（可能是自由球员，或名字拼写不同）"}
-    return {"matches": [{"player": p, "fantasy_team": t} for p, t in hits.items()]}
+    team_managers = fantasy.manager_by_team_name()
+    return {"matches": [{"player": p, "fantasy_team": t, "manager": team_managers.get(t)} for p, t in hits.items()]}
 
 
 def _obj(props: dict[str, Any], required: list[str] | None = None) -> dict[str, Any]:
@@ -93,9 +94,10 @@ TOOLS: list[ToolSpec] = [
     ),
     ToolSpec(
         "get_fantasy_roster",
-        "Roster of one fantasy team (any team in the league): players, NBA team, position, lineup slot, "
+        "Roster of one fantasy team (any team in the league; accepts a manager name too): players, NBA team, position, lineup slot, "
         "injury status, season and last-7-day averages in league categories.",
-        _obj({"team_name": {"type": "string", "description": "fantasy team name or abbreviation"}}, ["team_name"]),
+        _obj({"team_name": {"type": "string", "description": "fantasy team name, abbreviation, or manager name"}},
+             ["team_name"]),
         lambda team_name: fantasy.get_team_roster(team_name),
     ),
     ToolSpec(

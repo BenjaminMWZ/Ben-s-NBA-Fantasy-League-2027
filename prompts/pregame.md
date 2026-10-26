@@ -4,7 +4,7 @@
 1. **标题**：一句带梗的标题，含日期。
 2. **今日焦点**：数据里 focus_games 的 2~3 场，每场一两句看点（可以结合 reasons、战绩、伤病），注明开赛时间（{timezone}）。
 3. **伤病速报**：优先列 fantasy 相关的伤病（fantasy_injuries，注明是哪个 fantasy 队的球员），再简单提一下其他重要伤病（other_notable_injuries）。只写今天有比赛的队伍相关的就行，状态照抄（Out / Doubtful / Questionable / Day-To-Day）。
-4. **群友提醒**：一两句，例如提醒某位老板把伤停的球员换下来。
+4. **群友提醒**：一两句，例如点名提醒某位经理（用 fantasy_manager 里的名字）把伤停的球员换下来。
 
 其他场次可以在最后用一行带过（对阵 + 时间）。
 

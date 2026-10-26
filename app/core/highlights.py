@@ -111,6 +111,7 @@ def top_performances(boxes: list[BoxScore], owners: OwnerLookup, n: int = 5) -> 
             "line": f"{p.pts}分 {p.reb}板 {p.ast}助 {p.stl}断 {p.blk}帽 {p.fg3m}三分 投篮{p.fgm}/{p.fga} 罚球{p.ftm}/{p.fta} {p.tov}失误 {p.minutes}分钟",
             "tags": performance_tags(p),
             "fantasy_owner": owners.owner(p.name),
+            "fantasy_manager": owners.manager(p.name),
         }
         for _, p, opp in rows[:n]
     ]
@@ -127,6 +128,7 @@ def fantasy_duds(boxes: list[BoxScore], owners: OwnerLookup, n: int = 3) -> list
     rows.sort(key=lambda x: x[0])
     return [
         {"player": p.name, "team": p.team, "fantasy_owner": owners.owner(p.name),
+         "fantasy_manager": owners.manager(p.name),
          "line": f"{p.pts}分 {p.reb}板 {p.ast}助 投篮{p.fgm}/{p.fga} {p.tov}失误 {p.minutes}分钟"}
         for _, p in rows[:n]
     ]
