@@ -7,7 +7,7 @@
 4. **数据高光**：top_performances 里的 3~5 人，每人一行数据 + 一句点评；如果 fantasy_manager 不为空，直接点名恭喜（或调侃）这位经理。
 5. **今日伤病**：todays_injuries 里的情况，每人一行（中文写伤病部位和状态，一句话）。
    - in_game 为 true 的是比赛中受伤 / 提前退场，放最前面重点写；其余是今天公布的伤停。
-   - fantasy_manager 不为空时点名提醒这位经理（比如"James 注意了"）。
+   - fantasy_manager 不为空时点名提醒这位经理（比如"Alice 注意了"）。
    - 列表为空就写一句"今天没有新增伤病"。
 6. **Fantasy 战况**：
    - 当前排名前几和垫底的队，领先多少（standings）。排名变化只能根据 prev_rank（上次排名）和 rank 对比来说，比如"从第 3 升到第 1"；prev_rank 和 rank 相同就不要说"易主""反超"。
