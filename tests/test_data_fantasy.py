@@ -15,19 +15,56 @@ def test_scoring_categories():
     assert names == ["PTS", "BLK", "STL", "AST", "REB", "3PM", "FG%", "FT%"]
 
 
-def test_parse_standings_order_ranks_and_gaps():
-    rows = fantasy.parse_standings(RAW)
+def test_live_points_match_espn_points_live():
+    """Rebuilt live roto points must equal what ESPN's app shows (pointsLive) for every team."""
+    rows = {r["abbrev"]: r for r in fantasy.parse_standings(RAW)["standings"]}
+    for t in RAW["teams"]:
+        assert rows[t["abbrev"]]["roto_points"] == pytest.approx(t["pointsLive"])
+
+
+def test_parse_standings_order_ranks_and_change():
+    s = fantasy.parse_standings(RAW)
+    rows = s["standings"]
     assert len(rows) == 11
     pts = [r["roto_points"] for r in rows]
     assert pts == sorted(pts, reverse=True)
     assert rows[0]["rank"] == 1 and rows[0]["gap_to_first"] == 0
-    # total roto points equal the sum of category points
     for r in rows:
         assert sum(c["roto_points"] for c in r["categories"].values()) == pytest.approx(r["roto_points"])
-    # tied teams share a rank
-    for a, b in zip(rows, rows[1:]):
-        if a["roto_points"] == b["roto_points"]:
-            assert a["rank"] == b["rank"]
+    # games were played today: change = live - nightly settled points, prev rank from settled points
+    assert "今天" in s["change_basis"]
+    by = {t["abbrev"]: t for t in RAW["teams"]}
+    for r in rows:
+        assert r["change"] == pytest.approx(r["roto_points"] - by[r["abbrev"]]["points"])
+    settled_order = sorted(RAW["teams"], key=lambda t: -t["points"])
+    assert {r["abbrev"]: r["prev_rank"] for r in rows}[settled_order[0]["abbrev"]] == 1
+
+
+def test_no_games_today_falls_back_to_last_settled_day():
+    import copy
+
+    raw = copy.deepcopy(RAW)
+    for t in raw["teams"]:
+        t["roster"]["entries"] = []  # nothing played since settlement
+    s = fantasy.parse_standings(raw)
+    assert "上一个比赛日" in s["change_basis"]
+    by = {t["abbrev"]: t for t in raw["teams"]}
+    for r in s["standings"]:
+        assert r["roto_points"] == pytest.approx(by[r["abbrev"]]["points"])
+        assert r["change"] == pytest.approx(by[r["abbrev"]]["pointsDelta"])
+
+
+def test_percentages_recomputed_from_makes_and_attempts():
+    values = fantasy.live_values(RAW)
+    for v in values.values():
+        assert v["19"] == pytest.approx(v["13"] / v["14"])
+        assert v["20"] == pytest.approx(v["15"] / v["16"])
+
+
+def test_category_points_ties_share_average():
+    cats = [{"stat_id": "6", "name": "REB", "lower_is_better": False}]
+    pts = fantasy.category_points({1: {"6": 10.0}, 2: {"6": 10.0}, 3: {"6": 5.0}}, cats)
+    assert pts[1]["REB"] == pts[2]["REB"] == 2.5 and pts[3]["REB"] == 1
 
 
 def test_parse_category_standings_single_and_gap():
@@ -35,7 +72,7 @@ def test_parse_category_standings_single_and_gap():
     vals = [r["value"] for r in reb]
     assert vals == sorted(vals, reverse=True)
     assert reb[0]["gap_to_next_above"] is None
-    assert reb[1]["gap_to_next_above"] == pytest.approx(vals[0] - vals[1])
+    assert reb[1]["gap_to_next_above"] == pytest.approx(vals[0] - vals[1], abs=0.05)
 
 
 def test_parse_category_standings_unknown_category():

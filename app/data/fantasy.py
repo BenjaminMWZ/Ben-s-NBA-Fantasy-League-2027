@@ -79,10 +79,28 @@ def _league():
 
 @cache.cached(cache.FANTASY_TTL)
 def _raw_standings() -> dict:
-    return _league().espn_request.league_get(params={"view": ["mTeam", "mStandings", "mSettings"]})
+    # mRoster + scoringPeriodId adds each rostered player's stats for today's games,
+    # which are needed to compute live standings (see live_values).
+    lg = _league()
+    return lg.espn_request.league_get(params={
+        "view": ["mTeam", "mStandings", "mSettings", "mRoster"],
+        "scoringPeriodId": lg.current_week,
+    })
 
 
 # ---------------------------------------------------------------- parsing (pure)
+#
+# ESPN's team fields:
+#   valuesByStat / pointsByStat / points  -> official totals, settled once a night
+#   pointsLive                            -> live total incl. today's games (what the app shows)
+#   pointsDelta                           -> change at the last nightly settlement
+# ESPN gives no live per-category values, so they are rebuilt the way the app does it:
+# settled totals + today's stats of players in active lineup slots, then re-ranked.
+
+# Percentage categories are recomputed from makes / attempts.
+PCT_PARTS = {"19": ("13", "14"), "20": ("15", "16"), "21": ("17", "18")}
+BENCH_SLOTS = {12, 13}  # BE, IR
+TODAY_SPLIT = 5  # statSplitTypeId for a single scoring period's actual stats
 
 
 def scoring_categories(raw: dict) -> list[dict[str, Any]]:
@@ -100,34 +118,88 @@ def _fmt(cat: str, v: float | None):
     return round(v, 3) if cat in PERCENT_CATS else round(v, 1)
 
 
-def parse_standings(raw: dict) -> list[dict[str, Any]]:
-    cats = scoring_categories(raw)
-    teams = sorted(raw.get("teams", []), key=lambda t: -(t.get("points") or 0))
-    leader = teams[0].get("points", 0) if teams else 0
-    out = []
-    for i, t in enumerate(teams):
-        pts = t.get("points") or 0
-        # ties share the higher rank
-        rank = i + 1 if i == 0 or pts != teams[i - 1].get("points") else out[-1]["rank"]
-        vals, cpts = t.get("valuesByStat", {}), t.get("pointsByStat", {})
-        out.append({
-            "rank": rank,
-            "team": t.get("name", ""),
-            "abbrev": t.get("abbrev", ""),
-            "roto_points": pts,
-            "change_since_last_update": t.get("pointsDelta"),
-            "gap_to_first": round(leader - pts, 1),
-            "categories": {
-                c["name"]: {"value": _fmt(c["name"], vals.get(c["stat_id"])),
-                            "roto_points": cpts.get(c["stat_id"])}
-                for c in cats
-            },
-        })
+def live_values(raw: dict) -> dict[int, dict[str, float]]:
+    """team id -> stat id -> live season value (settled totals + today's active players)."""
+    period = raw.get("scoringPeriodId")
+    out = {}
+    for t in raw.get("teams", []):
+        v = {k: float(x) for k, x in (t.get("valuesByStat") or {}).items()}
+        for e in (t.get("roster") or {}).get("entries", []):
+            if e.get("lineupSlotId") in BENCH_SLOTS:
+                continue
+            for s in e.get("playerPoolEntry", {}).get("player", {}).get("stats", []):
+                if (s.get("scoringPeriodId") == period and s.get("statSourceId") == 0
+                        and s.get("statSplitTypeId") == TODAY_SPLIT):
+                    for k, x in s.get("stats", {}).items():
+                        if k in v:
+                            v[k] += x
+        for pct, (made, att) in PCT_PARTS.items():
+            if pct in v and v.get(att):
+                v[pct] = v[made] / v[att]
+        out[t["id"]] = v
     return out
 
 
+def category_points(values: dict[int, dict[str, float]], cats: list[dict]) -> dict[int, dict[str, float]]:
+    """Roto points per team per category: 1 for last up to N for first, ties share the average."""
+    out: dict[int, dict[str, float]] = {tid: {} for tid in values}
+    for c in cats:
+        sid, sign = c["stat_id"], (-1 if c["lower_is_better"] else 1)
+        for tid, v in values.items():
+            x = sign * v.get(sid, 0.0)
+            below = sum(1 for o in values.values() if sign * o.get(sid, 0.0) < x)
+            equal = sum(1 for o in values.values() if sign * o.get(sid, 0.0) == x)
+            out[tid][c["name"]] = below + (equal + 1) / 2
+    return out
+
+
+def _ranks(points: dict[int, float]) -> dict[int, int]:
+    return {tid: 1 + sum(o > p for o in points.values()) for tid, p in points.items()}
+
+
+def parse_standings(raw: dict) -> dict[str, Any]:
+    cats = scoring_categories(raw)
+    teams = {t["id"]: t for t in raw.get("teams", [])}
+    values = live_values(raw)
+    cpts = category_points(values, cats)
+    live = {tid: sum(cpts[tid].values()) for tid in teams}
+    for tid, t in teams.items():
+        if t.get("pointsLive") is not None and abs(live[tid] - t["pointsLive"]) > 1e-6:
+            log.warning("live roto points for %s: computed %.1f, ESPN pointsLive %.1f",
+                        t.get("abbrev"), live[tid], t["pointsLive"])
+
+    official = {tid: float(t.get("points") or 0) for tid, t in teams.items()}
+    today = {tid: live[tid] - official[tid] for tid in teams}
+    if any(abs(x) > 1e-6 for x in today.values()):
+        change, prev = today, official
+        basis = "今天实时变化（实时总分 − 昨晚结算总分，含进行中的比赛）"
+    else:  # nothing played since the nightly settlement: report the last settled day instead
+        change = {tid: float(t.get("pointsDelta") or 0) for tid, t in teams.items()}
+        prev = {tid: official[tid] - change[tid] for tid in teams}
+        basis = "上一个比赛日的变化（今天还没有比赛计入）"
+
+    rank, prev_rank = _ranks(live), _ranks(prev)
+    leader = max(live.values(), default=0)
+    rows = [{
+        "rank": rank[tid],
+        "prev_rank": prev_rank[tid],
+        "team": t.get("name", ""),
+        "abbrev": t.get("abbrev", ""),
+        "roto_points": live[tid],
+        "change": round(change[tid], 1),
+        "gap_to_first": round(leader - live[tid], 1),
+        "categories": {
+            c["name"]: {"value": _fmt(c["name"], values[tid].get(c["stat_id"])),
+                        "roto_points": cpts[tid][c["name"]]}
+            for c in cats
+        },
+    } for tid, t in teams.items()]
+    rows.sort(key=lambda r: (r["rank"], r["team"]))
+    return {"change_basis": basis, "standings": rows}
+
+
 def parse_category_standings(raw: dict, category: str | None = None) -> dict[str, list[dict]]:
-    """Per-category ranking with the gap to the team just above (where points can be gained)."""
+    """Per-category live ranking with the gap to the team just above (where points can be gained)."""
     cats = scoring_categories(raw)
     if category:
         want = category.strip().upper()
@@ -135,11 +207,13 @@ def parse_category_standings(raw: dict, category: str | None = None) -> dict[str
         if not cats:
             names = ", ".join(c["name"] for c in scoring_categories(raw))
             raise DataError(f"联赛没有 '{category}' 这个计分项，可选: {names}")
+    values = live_values(raw)
+    cpts = category_points(values, cats)
     result = {}
     for c in cats:
         rows = [
-            {"team": t.get("name", ""), "value": t.get("valuesByStat", {}).get(c["stat_id"]),
-             "roto_points": t.get("pointsByStat", {}).get(c["stat_id"])}
+            {"team": t.get("name", ""), "value": values[t["id"]].get(c["stat_id"]),
+             "roto_points": cpts[t["id"]][c["name"]]}
             for t in raw.get("teams", [])
         ]
         sign = 1 if c["lower_is_better"] else -1
@@ -210,8 +284,9 @@ def get_standings() -> dict[str, Any]:
     raw = _raw_standings()
     return {
         "scoring_type": raw.get("settings", {}).get("scoringSettings", {}).get("scoringType"),
-        "note": "Roto 联赛：每个计分项按排名给分，总分 = 各项得分之和；change_since_last_update 为较上次更新的总分变化",
-        "standings": parse_standings(raw),
+        "note": "Roto 实时排名（和 ESPN App 一致）：每个计分项按排名给分，总分 = 各项得分之和；"
+                "change 的含义见 change_basis，prev_rank 是变化之前的排名",
+        **parse_standings(raw),
     }
 
 
