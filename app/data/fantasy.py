@@ -14,7 +14,7 @@ import logging
 from typing import Any
 
 from app.config import ConfigError, settings
-from app.data import cache
+from app.data import cache, managers
 from app.data.injuries import Injury
 from app.data.nba import DataError
 
@@ -179,12 +179,14 @@ def parse_standings(raw: dict) -> dict[str, Any]:
         basis = "上一个比赛日的变化（今天还没有比赛计入）"
 
     rank, prev_rank = _ranks(live), _ranks(prev)
+    mgr = managers.load()
     leader = max(live.values(), default=0)
     rows = [{
         "rank": rank[tid],
         "prev_rank": prev_rank[tid],
         "team": t.get("name", ""),
         "abbrev": t.get("abbrev", ""),
+        "manager": mgr.get(t.get("abbrev", "")),
         "roto_points": live[tid],
         "change": round(change[tid], 1),
         "gap_to_first": round(leader - live[tid], 1),
@@ -209,10 +211,12 @@ def parse_category_standings(raw: dict, category: str | None = None) -> dict[str
             raise DataError(f"联赛没有 '{category}' 这个计分项，可选: {names}")
     values = live_values(raw)
     cpts = category_points(values, cats)
+    mgr = managers.load()
     result = {}
     for c in cats:
         rows = [
-            {"team": t.get("name", ""), "value": values[t["id"]].get(c["stat_id"]),
+            {"team": t.get("name", ""), "manager": mgr.get(t.get("abbrev", "")),
+             "value": values[t["id"]].get(c["stat_id"]),
              "roto_points": cpts[t["id"]][c["name"]]}
             for t in raw.get("teams", [])
         ]
@@ -229,8 +233,13 @@ def parse_category_standings(raw: dict, category: str | None = None) -> dict[str
 
 
 def match_team(teams: list, query: str):
-    """Find a team by name or abbreviation (case-insensitive, substring)."""
+    """Find a team by manager name, team name or abbreviation (case-insensitive, substring)."""
     q = query.strip().lower()
+    by_manager = {name.lower(): abbrev for abbrev, name in managers.load().items()}
+    if q in by_manager:
+        hits = [t for t in teams if t.team_abbrev == by_manager[q]]
+        if hits:
+            return hits[0]
     for pred in (
         lambda t: t.team_name.lower() == q or t.team_abbrev.lower() == q,
         lambda t: q in t.team_name.lower(),
@@ -275,7 +284,8 @@ def get_league_info() -> dict[str, Any]:
         "scoring_type": lg.settings.scoring_type,
         "team_count": len(lg.teams),
         "categories": [c["name"] for c in scoring_categories(raw)],
-        "teams": [{"name": t.team_name, "abbrev": t.team_abbrev} for t in lg.teams],
+        "teams": [{"name": t.team_name, "abbrev": t.team_abbrev, "manager": managers.manager_for(t.team_abbrev)}
+                  for t in lg.teams],
     }
 
 
@@ -305,6 +315,7 @@ def get_team_roster(team_name: str) -> dict[str, Any]:
     return {
         "team": team.team_name,
         "abbrev": team.team_abbrev,
+        "manager": managers.manager_for(team.team_abbrev),
         "players": [player_summary(p, cats, settings.espn_season_year) for p in team.roster],
     }
 
@@ -325,6 +336,12 @@ def _free_agents(position: str | None, size: int):
 def get_rostered_players() -> dict[str, str]:
     """Rostered player name -> fantasy team name."""
     return {p.name: t.team_name for t in _league().teams for p in t.roster}
+
+
+def manager_by_team_name() -> dict[str, str]:
+    """fantasy team name -> manager name (only teams listed in managers.json)."""
+    mgr = managers.load()
+    return {t.team_name: mgr[t.team_abbrev] for t in _league().teams if t.team_abbrev in mgr}
 
 
 def get_rostered_player_names() -> set[str]:

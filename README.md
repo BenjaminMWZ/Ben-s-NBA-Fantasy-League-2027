@@ -45,6 +45,16 @@ Then edit `.env` (it is ignored by `.gitignore`; never commit it):
 
 The simpler option is for the commissioner to turn on **Make League Viewable to Public** in League Settings, so no cookies are needed. (This league is already public.)
 
+### Manager names
+
+`managers.json` maps each team to its manager's name, so the bot addresses people by name ("恭喜 Alice") instead of "XX 队老板". The file is git-ignored and never lands in the public repo:
+
+```bash
+cp managers.example.json managers.json   # then fill in "TEAM_ABBREV": "Name"
+```
+
+Chat also accepts a manager's name in place of a team name, e.g. "Alice 的阵容怎么样".
+
 ### Style examples
 
 `prompts/hupu_examples.md` holds the Hupu-style examples. The current ones are placeholders written by Claude; swap in 5–10 real posts, headlines or hot takes you find funny and the bot will sound more authentic. The persona and rules live in `prompts/system.md`; the report structures live in `prompts/pregame.md` and `prompts/postgame.md`.

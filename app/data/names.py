@@ -14,11 +14,19 @@ def norm(name: str) -> str:
 
 
 class OwnerLookup(dict):
-    """normalized player name -> fantasy team name."""
+    """normalized player name -> fantasy team name, plus team name -> manager name."""
+
+    team_managers: dict[str, str] = {}
 
     @classmethod
-    def from_rostered(cls, rostered: dict[str, str]) -> "OwnerLookup":
-        return cls({norm(p): t for p, t in rostered.items()})
+    def from_rostered(cls, rostered: dict[str, str], team_managers: dict[str, str] | None = None) -> "OwnerLookup":
+        lookup = cls({norm(p): t for p, t in rostered.items()})
+        lookup.team_managers = team_managers or {}
+        return lookup
 
     def owner(self, name: str) -> str | None:
         return self.get(norm(name))
+
+    def manager(self, name: str) -> str | None:
+        team = self.owner(name)
+        return self.team_managers.get(team) if team else None

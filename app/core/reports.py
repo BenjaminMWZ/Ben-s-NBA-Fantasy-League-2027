@@ -56,7 +56,8 @@ def _game_brief(g: Game) -> dict[str, Any]:
 
 def _owners(errors: list[str]) -> OwnerLookup:
     rostered = _try(errors, "fantasy 阵容", fantasy.get_rostered_players, {})
-    return OwnerLookup.from_rostered(rostered)
+    team_managers = _try(errors, "fantasy 经理名单", fantasy.manager_by_team_name, {}) if rostered else {}
+    return OwnerLookup.from_rostered(rostered, team_managers)
 
 
 def _write(template: str, data: dict[str, Any], provider: LLMProvider) -> str:
@@ -77,7 +78,8 @@ def collect_pregame_data(game_date: str | None = None) -> dict[str, Any]:
 
     playing = {t.nickname for g in games for t in (g.away, g.home)}
     todays_inj = [i for i in inj if any(i.team.endswith(n) for n in playing if n)]
-    fantasy_inj = [{**i.model_dump(include={"player", "team", "status", "detail"}), "fantasy_owner": owners.owner(i.player)}
+    fantasy_inj = [{**i.model_dump(include={"player", "team", "status", "detail"}),
+                    "fantasy_owner": owners.owner(i.player), "fantasy_manager": owners.manager(i.player)}
                    for i in todays_inj if owners.owner(i.player)]
     other_inj = [i.model_dump(include={"player", "team", "status", "detail"})
                  for i in todays_inj if not owners.owner(i.player) and i.status in SERIOUS][:8]
@@ -130,7 +132,8 @@ def _close_battles(cats: dict[str, list[dict]], n: int = 4) -> list[dict[str, An
             if above["value"] in (None, 0) or below["gap_to_next_above"] is None:
                 continue
             rel = below["gap_to_next_above"] / abs(above["value"])
-            battles.append((rel, {"category": cat, "chaser": below["team"], "leader": above["team"],
+            battles.append((rel, {"category": cat, "chaser": below["team"], "chaser_manager": below.get("manager"),
+                                  "leader": above["team"], "leader_manager": above.get("manager"),
                                   "gap": below["gap_to_next_above"], "leader_value": above["value"],
                                   "chaser_value": below["value"]}))
     battles.sort(key=lambda x: x[0])
@@ -178,12 +181,13 @@ def collect_postgame_data(game_date: str | None = None) -> dict[str, Any]:
     if standings:
         rows = standings["standings"]
         data["standings_change_basis"] = standings["change_basis"]
-        data["standings"] = [{k: r[k] for k in ("rank", "prev_rank", "team", "roto_points", "gap_to_first", "change")}
+        data["standings"] = [{k: r[k] for k in ("rank", "prev_rank", "team", "manager", "roto_points",
+                                                "gap_to_first", "change")}
                              for r in rows]
         movers = sorted(rows, key=lambda r: -r["change"])
         data["movers"] = {
-            "up": [{"team": r["team"], "change": r["change"]} for r in movers[:2]],
-            "down": [{"team": r["team"], "change": r["change"]} for r in movers[-2:][::-1]],
+            "up": [{"team": r["team"], "manager": r["manager"], "change": r["change"]} for r in movers[:2]],
+            "down": [{"team": r["team"], "manager": r["manager"], "change": r["change"]} for r in movers[-2:][::-1]],
         }
     cats = _try(errors, "fantasy 分项排名", fantasy.get_category_standings)
     if cats:
