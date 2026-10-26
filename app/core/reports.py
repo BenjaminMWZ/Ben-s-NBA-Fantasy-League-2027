@@ -7,15 +7,16 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from concurrent.futures import ThreadPoolExecutor
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from typing import Any, Callable
 from zoneinfo import ZoneInfo
 
 from app.config import settings
 from app.core import highlights, prompting
 from app.data import fantasy, injuries, nba
-from app.data.injuries import SERIOUS
+from app.data.injuries import SERIOUS, Injury
 from app.data.names import OwnerLookup
 from app.data.nba import DataError, Game
 from app.llm.base import LLMProvider, Message, get_provider, run_tool_loop
@@ -145,6 +146,40 @@ def _close_battles(cats: dict[str, list[dict]], n: int = 4) -> list[dict[str, An
     return out[:n]
 
 
+# Injury notes describing something that happened during a game (vs. pre-game status / next-game previews).
+IN_GAME_INJURY = re.compile(
+    r"(will not|won't|did not|didn't|does not|doesn't) return|stretchered|exited|x-rays|"
+    r"left (the|\w+'s) (game|contest)|during (the|\w+'s) (game|contest)",
+    re.IGNORECASE,
+)
+ET = ZoneInfo("America/New_York")
+
+
+def todays_injuries(inj: list[Injury], day: str, teams_played: set[str], owners: OwnerLookup,
+                    limit: int = 12) -> list[dict[str, Any]]:
+    """Injury updates published on `day` (ET, through 6am next morning for late games) for teams
+    that played that day. In-game injuries first, then fantasy-rostered players."""
+    start = datetime.combine(date.fromisoformat(day), time(0), ET)
+    end = start + timedelta(days=1, hours=6)
+    rows = []
+    for i in inj:
+        if not any(n and i.team.endswith(n) for n in teams_played):
+            continue
+        try:
+            updated = datetime.fromisoformat(i.updated.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if not start <= updated < end:
+            continue
+        rows.append({
+            "player": i.player, "team": i.team, "status": i.status, "detail": i.detail,
+            "in_game": bool(IN_GAME_INJURY.search(i.detail)),
+            "fantasy_owner": owners.owner(i.player), "fantasy_manager": owners.manager(i.player),
+        })
+    rows.sort(key=lambda r: (not r["in_game"], r["fantasy_owner"] is None, r["player"]))
+    return rows[:limit]
+
+
 def collect_postgame_data(game_date: str | None = None) -> dict[str, Any]:
     errors: list[str] = []
     day = game_date or default_postgame_date()
@@ -176,6 +211,9 @@ def collect_postgame_data(game_date: str | None = None) -> dict[str, Any]:
         "top_performances": highlights.top_performances(boxes, owners, n=5),
         "fantasy_duds": highlights.fantasy_duds(boxes, owners, n=3),
     }
+    inj = _try(errors, "伤病报告", injuries.get_injury_report, [])
+    played = {t.nickname for g in games if g.status != "scheduled" for t in (g.away, g.home)}
+    data["todays_injuries"] = todays_injuries(inj, day, played, owners)
 
     standings = _try(errors, "fantasy 排行榜", fantasy.get_standings)
     if standings:
