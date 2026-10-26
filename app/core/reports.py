@@ -177,16 +177,13 @@ def collect_postgame_data(game_date: str | None = None) -> dict[str, Any]:
     standings = _try(errors, "fantasy 排行榜", fantasy.get_standings)
     if standings:
         rows = standings["standings"]
-        data["standings"] = [{k: r[k] for k in ("rank", "team", "roto_points", "gap_to_first", "change_since_last_update")}
+        data["standings_change_basis"] = standings["change_basis"]
+        data["standings"] = [{k: r[k] for k in ("rank", "prev_rank", "team", "roto_points", "gap_to_first", "change")}
                              for r in rows]
-        # Previous ranking reconstructed from points - change, so rank moves are data, not guesses.
-        prev = {r["team"]: r["roto_points"] - (r["change_since_last_update"] or 0) for r in rows}
-        for r in data["standings"]:
-            r["prev_rank"] = 1 + sum(v > prev[r["team"]] for v in prev.values())
-        movers = sorted(rows, key=lambda r: -(r["change_since_last_update"] or 0))
+        movers = sorted(rows, key=lambda r: -r["change"])
         data["movers"] = {
-            "up": [{"team": r["team"], "change": r["change_since_last_update"]} for r in movers[:2]],
-            "down": [{"team": r["team"], "change": r["change_since_last_update"]} for r in movers[-2:][::-1]],
+            "up": [{"team": r["team"], "change": r["change"]} for r in movers[:2]],
+            "down": [{"team": r["team"], "change": r["change"]} for r in movers[-2:][::-1]],
         }
     cats = _try(errors, "fantasy 分项排名", fantasy.get_category_standings)
     if cats:

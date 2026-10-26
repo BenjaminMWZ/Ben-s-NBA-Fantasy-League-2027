@@ -7,7 +7,7 @@
 4. **数据高光**：top_performances 里的 3~5 人，每人一行数据 + 一句点评；如果 fantasy_owner 不为空，顺便恭喜（或调侃）那位老板。
 5. **Fantasy 战况**：
    - 当前排名前几和垫底的队，领先多少（standings）。排名变化只能根据 prev_rank（上次排名）和 rank 对比来说，比如"从第 3 升到第 1"；prev_rank 和 rank 相同就不要说"易主""反超"。
-   - 涨分最多 / 掉分最多的队（movers，change_since_last_update 是总分较上次更新的变化）。
+   - 涨分最多 / 掉分最多的队（movers；change 的含义见 standings_change_basis，照它的口径说，比如"今天"还是"上个比赛日"）。
    - fantasy_duds 里拖后腿的球员，点名调侃一下他们的老板。
    - close_battles：分项上咬得最紧的争夺，提醒相关老板。
 

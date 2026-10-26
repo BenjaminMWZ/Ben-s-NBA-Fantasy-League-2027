@@ -71,9 +71,10 @@ def cmd_league(a):
 def cmd_standings(a):
     s = fantasy.get_standings()
     cats = list(s["standings"][0]["categories"]) if s["standings"] else []
+    print(f"变化口径: {s['change_basis']}")
     print(f"{'#':>2} {'队伍':<28}{'总分':>6}{'变化':>7}  " + " ".join(f"{c:>5}" for c in cats))
     for r in s["standings"]:
-        print(f"{r['rank']:>2} {r['team']:<28}{r['roto_points']:>6}{r['change_since_last_update']:>+7}  "
+        print(f"{r['rank']:>2} {r['team']:<28}{r['roto_points']:>6}{r['change']:>+7}  "
               + " ".join(f"{r['categories'][c]['roto_points']:>5}" for c in cats))
 
 
